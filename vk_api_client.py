@@ -12,10 +12,9 @@ class VKClient:
             age_from=age_from,
             age_to=age_to,
             offset=offset,
-            count=1,  # Возвращаем только одного пользователя
-            fields='photo_max_orig'
+            count=100  # Возвращаем до 100 пользователей
         )
-        return response['items']
+        return response.get('items', [])  # Возвращаем пустой список, если нет результатов
 
     def get_photos(self, user_id):
         response = self.api.photos.get(
@@ -24,3 +23,10 @@ class VKClient:
             extended=1  # Включает дополнительные поля, такие как количество лайков
         )
         return response['items']
+
+    def get_user_info(self, user_id):
+        response = self.api.users.get(
+            user_ids=user_id,
+            fields='sex,city,bdate'
+        )
+        return response[0]
