@@ -1,2 +1,7 @@
-VK_GROUP_TOKEN = "vk1.a.5Gpdigx7xJe-ALQpiMdws-YLN4p2GA5BK7NI0XBY_BYzLfOfD-8816moW79YhyiDGN3EnfJSBy0zhIKWQKksQILhvczfVL7JH3DAcZbHcIyphy1WxrSae00kN157ka9eGPkInVudRL0LgFJcqLtjD62CfcQslfYre5gukDqGIis4uHM4Cxrdxba18uha-1akgzLJK1WOBuPn9cLhG8n0dw"
-VK_USER_TOKEN = "vk1.a.LAJSTXkyf1JO3d-IMBnBkNAC3zyfCjLDIC15A8c6AWdxw1eDbShpDypWSsx99oEIQmcXO9H8rWIS_F5gT-NquHPHVahA6NPGJs_WIzuMqYZqkchQpFGT1ae_LElVKEkfHiVxXXFBXenHccw7xjexaLMEE6JilL22OJz206lolxjOj92ps2Vs3CC2eaYV7_WFCsmYdkW7gW5Lzi493dkNZw"
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+VK_GROUP_TOKEN = os.getenv('VK_GROUP_TOKEN')
+VK_USER_TOKEN = os.getenv('VK_USER_TOKEN')

@@ -1,44 +1,26 @@
-import requests
-
-API_URL = "https://api.vk.com/method/"
-API_VERSION = "5.131"
+import vk_api
 
 class VKClient:
     def __init__(self, token):
-        self.token = token
+        self.vk = vk_api.VkApi(token=token).get_api()
 
-    def _request(self, method, params):
-        params["access_token"] = self.token
-        params["v"] = API_VERSION
-        response = requests.get(API_URL + method, params=params)
-        data = response.json()
-        if "error" in data:
-            raise Exception(data["error"])
-        return data["response"]
-
-    def search_user(self, sex, city, age_from, age_to, offset):
-        result = self._request(
-            "users.search",
-            {
-                "sex": sex,
-                "city": city,
-                "age_from": age_from,
-                "age_to": age_to,
-                "has_photo": 1,
-                "count": 1,
-                "offset": offset
-            }
+    def search_user(self, sex, city, age_from, age_to, offset=0, count=10):
+        response = self.vk.users.search(
+            sex=sex,
+            city=city,
+            age_from=age_from,
+            age_to=age_to,
+            offset=offset,
+            count=count,
+            fields='photo_max'
         )
-        return result["items"][0]
+        return response['items']
 
     def get_top_photos(self, user_id):
-        photos = self._request(
-            "photos.get",
-            {
-                "owner_id": user_id,
-                "album_id": "profile",
-                "extended": 1
-            }
-        )["items"]
-        photos.sort(key=lambda x: x["likes"]["count"], reverse=True)
+        photos = self.vk.photos.get(
+            owner_id=user_id,
+            album_id='profile',
+            extended=1
+        )
+        photos.sort(key=lambda x: x['likes']['count'], reverse=True)
         return photos[:3]

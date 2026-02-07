@@ -1,9 +1,8 @@
 import vk_api
 from vk_api.longpoll import VkLongPoll, VkEventType
-
 from config import VK_GROUP_TOKEN, VK_USER_TOKEN
 from vk_api_client import VKClient
-from favorites import add_to_favorites
+from favorites import add_to_favorites, get_favorites
 from utils import build_attachments
 
 vk_session = vk_api.VkApi(token=VK_GROUP_TOKEN)
@@ -21,6 +20,49 @@ def send_message(user_id, message, attachments=None):
         random_id=0
     )
 
+def handle_search_command(user_id):
+    try:
+        users = vk_client.search_user(
+            sex=2,
+            city=2,
+            age_from=20,
+            age_to=30,
+            offset=offset
+        )
+        if users:
+            user = users[0]
+            photos = vk_client.get_top_photos(user["id"])
+            attachments = build_attachments(photos)
+
+            send_message(
+                user_id,
+                f'{user["first_name"]} {user["last_name"]}\nhttps://vk.com/id{user["id"]}',
+                attachments
+            )
+
+            add_to_favorites({
+                "user_id": user["id"],
+                "first_name": user["first_name"],
+                "last_name": user["last_name"],
+                "profile_url": f'https://vk.com/id{user["id"]}'
+            })
+
+            offset += 1
+        else:
+            send_message(user_id, "Пользователи не найдены.")
+    except Exception as e:
+        send_message(user_id, f"Ошибка: {e}")
+
+def handle_favorites_command(user_id):
+    favorites = get_favorites()
+    if favorites:
+        message = "Избранные пользователи:\n"
+        for user in favorites:
+            message += f'{user["first_name"]} {user["last_name"]}: {user["profile_url"]}\n'
+        send_message(user_id, message)
+    else:
+        send_message(user_id, "Избранные пользователи отсутствуют.")
+
 print("Бот запущен")
 
 for event in longpoll.listen():
@@ -29,32 +71,8 @@ for event in longpoll.listen():
         text = event.text.lower()
 
         if text == "поиск":
-            try:
-                user = vk_client.search_user(
-                    sex=2,
-                    city=2,
-                    age_from=20,
-                    age_to=30,
-                    offset=offset
-                )
-                photos = vk_client.get_top_photos(user["id"])
-                attachments = build_attachments(photos)
-
-                send_message(
-                    user_id,
-                    f'{user["first_name"]} {user["last_name"]}\nhttps://vk.com/id{user["id"]}',
-                    attachments
-                )
-
-                add_to_favorites({
-                    "user_id": user["id"],
-                    "first_name": user["first_name"],
-                    "last_name": user["last_name"],
-                    "profile_url": f'https://vk.com/id{user["id"]}'
-                })
-
-                offset += 1
-            except Exception as e:
-                send_message(user_id, f"Ошибка: {e}")
+            handle_search_command(user_id)
+        elif text == "избранное":
+            handle_favorites_command(user_id)
         else:
-            send_message(user_id, "Напиши: поиск")
+            send_message(user_id, "Напиши: поиск или избранное")
