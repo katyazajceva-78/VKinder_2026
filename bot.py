@@ -1,103 +1,196 @@
+import random
+from datetime import datetime
+
 import vk_api
 from vk_api.longpoll import VkLongPoll, VkEventType
 
 from config import VK_GROUP_TOKEN, VK_USER_TOKEN
-from vk_api_client import VKClient
+from vk_api_client import VkApiClient
 from favorites import add_to_favorites, get_favorites
-from utils import build_attachments
 
+
+# --- VK INIT ---
 vk_session = vk_api.VkApi(token=VK_GROUP_TOKEN)
-longpoll = VkLongPoll(vk_session)
 vk = vk_session.get_api()
+longpoll = VkLongPoll(vk_session)
 
-vk_client = VKClient(VK_USER_TOKEN)
-offset = 0  # Инициализация переменной offset
+vk_user = VkApiClient(VK_USER_TOKEN)
 
-def send_message(user_id, message, attachments=None):
+# --- MEMORY ---
+search_results = {}
+search_offsets = {}
+
+
+# --- UTILS ---
+def send_message(user_id: int, text: str, attachments: str | None = None) -> None:
     vk.messages.send(
         user_id=user_id,
-        message=message,
-        attachment=attachments,
-        random_id=0
+        message=text,
+        random_id=random.randint(1, 10**9),
+        attachment=attachments
     )
 
-def get_top_photos(user_id):
-    photos = vk_client.get_photos(user_id)
-    photos_with_likes = [(photo['likes']['count'], photo['id'], photo['sizes'][-1]['url']) for photo in photos]
-    photos_with_likes.sort(reverse=True)
-    return [url for _, _, url in photos_with_likes[:3]]
 
-def handle_search_command(user_id):
-    global offset
-    try:
-        user_info = vk_client.get_user_info(user_id)
-        sex = 2 if user_info['sex'] == 1 else 1  # противоположный пол
-        city = user_info.get('city', {}).get('id', 2)  # по умолчанию Москва
-        age_from = 20
-        age_to = 30
+# --- LOGIC ---
+def show_user(user_id: int, profile: dict) -> None:
+    profile_id = profile.get("id")
+    if not isinstance(profile_id, int):
+        return
 
-        users = vk_client.search_user(
-            sex=sex,
-            city=city,
-            age_from=age_from,
-            age_to=age_to,
-            offset=offset
-        )
-        if users:
-            user = users[0]
-            photos = get_top_photos(user["id"])
-            attachments = build_attachments(photos)
+    photos = vk_user.get_top_photos(profile_id)
 
-            send_message(
-                user_id,
-                f'{user["first_name"]} {user["last_name"]}\nhttps://vk.com/id{user["id"]}',
-                attachments
-            )
+    message = (
+        f"{profile.get('first_name', '')} {profile.get('last_name', '')}\n"
+        f"https://vk.com/id{profile_id}"
+    )
 
-            add_to_favorites({
-                "user_id": user["id"],
-                "first_name": user["first_name"],
-                "last_name": user["last_name"],
-                "profile_url": f'https://vk.com/id{user["id"]}'
-            })
+    send_message(user_id, message, ",".join(photos))
 
-            offset += 1
-        else:
-            send_message(user_id, "Пользователи не найдены.")
-    except Exception as e:
-        send_message(user_id, f"Ошибка: {e}")
 
-def handle_favorites_command(user_id):
+def handle_search(user_id: int) -> None:
+    user_info = vk_user.get_user_info(user_id)
+
+    if not isinstance(user_info, dict) or not user_info:
+        send_message(user_id, "Не удалось получить данные профиля 😢")
+        return
+
+    # --- ЯВНАЯ ПРОВЕРКА ДАННЫХ ---
+    if "sex" not in user_info or user_info["sex"] not in (1, 2):
+        send_message(user_id, "Укажи пол в профиле VK и попробуй снова 🙂")
+        return
+
+    if "city" not in user_info or not user_info["city"]:
+        send_message(user_id, "Укажи город в профиле VK и попробуй снова 🙂")
+        return
+
+    if "bdate" not in user_info:
+        send_message(user_id, "Укажи дату рождения в профиле VK и попробуй снова 🙂")
+        return
+
+    sex = user_info["sex"]
+    city = user_info["city"]
+    bdate = user_info["bdate"]
+
+    # город может быть dict или int
+    if isinstance(city, dict):
+        city_id = city.get("id")
+    else:
+        city_id = city
+
+    if not city_id:
+        send_message(user_id, "Не удалось определить город 😕")
+        return
+
+    parts = bdate.split(".")
+    if len(parts) != 3:
+        send_message(user_id, "Дата рождения должна быть указана с годом 😕")
+        return
+
+    birth_year = int(parts[2])
+    age = datetime.now().year - birth_year
+
+    target_sex = 1 if sex == 2 else 2
+
+    results = vk_user.search_users(
+        sex=target_sex,
+        city_id=city_id,
+        age_from=age - 2,
+        age_to=age + 2
+    )
+
+    if not results:
+        send_message(user_id, "Никого не найдено 😔")
+        return
+
+    search_results[user_id] = results
+    search_offsets[user_id] = 0
+
+    show_user(user_id, results[0])
+
+
+
+def handle_next(user_id: int) -> None:
+    results = search_results.get(user_id)
+
+    if not results:
+        send_message(user_id, "Сначала напиши «поиск» 🔍")
+        return
+
+    search_offsets[user_id] += 1
+    offset = search_offsets[user_id]
+
+    if offset >= len(results):
+        send_message(user_id, "Анкеты закончились 😅")
+        return
+
+    show_user(user_id, results[offset])
+
+
+def handle_add_favorite(user_id: int) -> None:
+    results = search_results.get(user_id)
+    if not results:
+        send_message(user_id, "Нет анкеты для добавления ❌")
+        return
+
+    offset = search_offsets.get(user_id, 0)
+    profile = results[offset]
+
+    add_to_favorites({
+        "id": profile.get("id"),
+        "name": f"{profile.get('first_name', '')} {profile.get('last_name', '')}",
+        "profile_url": f"https://vk.com/id{profile.get('id')}",
+        "added_at": datetime.now().isoformat()
+    })
+
+    send_message(user_id, "Добавлено в избранное ⭐")
+
+
+def handle_show_favorites(user_id: int) -> None:
     favorites = get_favorites()
-    if favorites:
-        message = "Избранные пользователи:\n"
-        for user in favorites:
-            message += f'{user["first_name"]} {user["last_name"]}: {user["profile_url"]}\n'
-        send_message(user_id, message)
-    else:
-        send_message(user_id, "Избранные пользователи отсутствуют.")
 
-def handle_help_command(user_id):
-    message = "Доступные команды:\n"
-    message += "поиск - найти пользователя\n"
-    message += "избранное - показать избранных пользователей\n"
-    message += "помощь - показать доступные команды"
-    send_message(user_id, message)
+    if not favorites:
+        send_message(user_id, "Список избранных пуст 📭")
+        return
 
-def handle_command(user_id, text):
-    if text == "поиск":
-        handle_search_command(user_id)
-    elif text == "избранное":
-        handle_favorites_command(user_id)
-    elif text == "помощь":
-        handle_help_command(user_id)
-    else:
-        send_message(user_id, "Неизвестная команда. Напиши 'помощь' для списка команд.")
+    text = "⭐ Избранные:\n\n"
+    for fav in favorites:
+        text += f"{fav['name']} — {fav['profile_url']}\n"
 
-print("Бот запущен")
+    send_message(user_id, text)
 
-for event in longpoll.listen():
-    if event.type == VkEventType.MESSAGE_NEW and event.to_me:
+
+# --- MAIN ---
+def main() -> None:
+    print("BOT STARTED (NO PROFILE CHECK)")
+
+    for event in longpoll.listen():
+        if event.type != VkEventType.MESSAGE_NEW or not event.to_me:
+            continue
+
         user_id = event.user_id
-        text = event.text.lower()
-        handle_command(user_id, text)
+        text = event.text.lower().strip()
+
+        try:
+            if text == "поиск":
+                handle_search(user_id)
+            elif text == "дальше":
+                handle_next(user_id)
+            elif text == "в избранное":
+                handle_add_favorite(user_id)
+            elif text == "избранные":
+                handle_show_favorites(user_id)
+            else:
+                send_message(
+                    user_id,
+                    "Команды:\n"
+                    "поиск 🔍\n"
+                    "дальше ➡\n"
+                    "в избранное ⭐\n"
+                    "избранные 📂"
+                )
+        except Exception as e:
+            print(f"Ошибка: {e}")
+
+
+if __name__ == "__main__":
+    main()
